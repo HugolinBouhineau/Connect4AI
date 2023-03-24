@@ -56,18 +56,28 @@ public class Solver {
             if(alpha >= beta) return beta;  // prune the exploration if the [alpha;beta] window is empty.
         }
 
-        for(int x = 0; x < Positionv2.WIDTH; x++) // compute the score of all possible next move and keep the best one
-            if((next & Positionv2.column_mask(columnOrder[x]))!=0) {
-                Positionv2 P2 = P.clone();
-                P2.play(columnOrder[x]);               // It's opponent turn in P2 position after current player plays x column.
-                int score = -negamax(P2, -beta, -alpha); // explore opponent's score within [-beta;-alpha] windows:
-                // no need to have good precision for score better than beta (opponent's score worse than -beta)
-                // no need to check for score worse than alpha (opponent's score worse better than -alpha)
+        MoveSorter moves = new MoveSorter();
 
-                if(score >= beta) return score;  // prune the exploration if we find a possible move better than what we were looking for.
-                if(score > alpha) alpha = score; // reduce the [alpha;beta] window for next exploration, as we only
-                // need to search for a position that is better than the best so far.
+        for(int i = Positionv2.WIDTH-1; i >=0 ; i--){
+            long move = next & Positionv2.column_mask(columnOrder[i]);
+            if(move!=0){
+                moves.add(move, P.moveScore(move));
             }
+        }
+
+        next = moves.getNext();
+        while(next!=0) {
+            Positionv2 P2 = P.clone();
+            P2.play(next);  // It's opponent turn in P2 position after current player plays x column.
+            int score = -negamax(P2, -beta, -alpha); // explore opponent's score within [-beta;-alpha] windows:
+            // no need to have good precision for score better than beta (opponent's score worse than -beta)
+            // no need to check for score worse than alpha (opponent's score worse better than -alpha)
+
+            if(score >= beta) return score;  // prune the exploration if we find a possible move better than what we were looking for.
+            if(score > alpha) alpha = score; // reduce the [alpha;beta] window for next exploration, as we only
+            // need to search for a position that is better than the best so far.
+            next = moves.getNext();
+        }
 
         map.put(P.key(), alpha - Positionv2.MIN_SCORE + 1);
         return alpha;
@@ -105,7 +115,7 @@ public class Solver {
         int nbline = 0;
         long meantime = 0;
 
-        Scanner scanner = new Scanner(this.getClass().getResourceAsStream("Test_L1_R1"));
+        Scanner scanner = new Scanner(this.getClass().getResourceAsStream("Test_L1_R2"));
         while (scanner.hasNextLine()) {
             nbline++;
             String line = scanner.nextLine().split(" ")[0];
@@ -115,7 +125,7 @@ public class Solver {
             } else {
                 reset();
                 long start_time = System.currentTimeMillis();
-                int score = solve(P, false);
+                int score = solve(P, true);
                 long end_time = System.currentTimeMillis();
                 meantime += end_time - start_time;
                 System.out.println(nbline + ": " + line + " " + score + " " + getNodeCount() + " " + (end_time - start_time));
