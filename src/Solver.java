@@ -5,8 +5,6 @@ public class Solver {
 
     private long nodeCount; // counter of explored nodes.
 
-    private int maxDepth;
-
     HashMap<Long, Integer> map;
 
     int[] columnOrder;
@@ -34,19 +32,21 @@ public class Solver {
      *  - negative score if your opponent can force you to lose. Your score is the oposite of
      *    the number of moves before the end you will lose (the faster you lose, the lower your score).
      */
-    int negamax(Positionv2 P, int alpha, int beta, int depth) {
+    int negamax(Positionv2 P, int alpha, int beta) {
         nodeCount++; // increment counter of explored nodes
 
-//        if(depth >= maxDepth){
-//            return 0;
-//        }
+        long next = P.possibleNonLoosingMoves();
+        if(next == 0)     // if no possible non losing move, opponent wins next move
+            return -(Positionv2.WIDTH*Positionv2.HEIGHT - P.nbMoves())/2;
 
-        if(P.nbMoves() == Positionv2.WIDTH*Positionv2.HEIGHT) // check for draw game
+        if(P.nbMoves() >= Positionv2.WIDTH*Positionv2.HEIGHT - 2) // check for draw game
             return 0;
 
-        for(int x = 0; x < Positionv2.WIDTH; x++) // check if current player can win next move
-            if(P.canPlay(x) && P.isWinningMove(x))
-                return (Positionv2.WIDTH*Positionv2.HEIGHT+1 - P.nbMoves())/2;
+        int min = -(Positionv2.WIDTH*Positionv2.HEIGHT-2 - P.nbMoves())/2;	// lower bound of score as opponent cannot win next move
+        if(alpha < min) {
+            alpha = min;                     // there is no need to keep beta above our max possible score.
+            if(alpha >= beta) return alpha;  // prune the exploration if the [alpha;beta] window is empty.
+        }
 
         int max = (Positionv2.WIDTH*Positionv2.HEIGHT-1 - P.nbMoves())/2;	// upper bound of our score as we cannot win immediately
         if(map.containsKey(P.key()))
@@ -57,10 +57,10 @@ public class Solver {
         }
 
         for(int x = 0; x < Positionv2.WIDTH; x++) // compute the score of all possible next move and keep the best one
-            if(P.canPlay(columnOrder[x])) {
+            if((next & Positionv2.column_mask(columnOrder[x]))!=0) {
                 Positionv2 P2 = P.clone();
                 P2.play(columnOrder[x]);               // It's opponent turn in P2 position after current player plays x column.
-                int score = -negamax(P2, -beta, -alpha, depth+1); // explore opponent's score within [-beta;-alpha] windows:
+                int score = -negamax(P2, -beta, -alpha); // explore opponent's score within [-beta;-alpha] windows:
                 // no need to have good precision for score better than beta (opponent's score worse than -beta)
                 // no need to check for score worse than alpha (opponent's score worse better than -alpha)
 
@@ -73,12 +73,26 @@ public class Solver {
         return alpha;
     }
 
-    int solve(Positionv2 P, int maxDepth)
+    int solve(Positionv2 P, boolean weak)
     {
-        nodeCount = 0;
-        this.maxDepth = maxDepth;
-        return negamax(P, -1, 1, 0);
-        //return negamax(P, -Positionv2.WIDTH*Positionv2.HEIGHT/2, Positionv2.WIDTH*Positionv2.HEIGHT/2, 0);
+        if(P.canWinNext()) // check if win in one move as the Negamax function does not support this case.
+            return (Positionv2.WIDTH*Positionv2.HEIGHT+1 - P.nbMoves())/2;
+        int min = -(Positionv2.WIDTH*Positionv2.HEIGHT - P.nbMoves())/2;
+        int max = (Positionv2.WIDTH*Positionv2.HEIGHT+1 - P.nbMoves())/2;
+        if(weak) {
+            min = -1;
+            max = 1;
+        }
+
+        while(min < max) {  // iteratively narrow the min-max exploration window
+            int med = min + (max - min)/2;
+            if(med <= 0 && min/2 < med) med = min/2;
+            else if(med >= 0 && max/2 > med) med = max/2;
+            int r = negamax(P, med, med + 1);   // use a null depth window to know if the actual score is greater or smaller than med
+            if(r <= med) max = r;
+            else min = r;
+        }
+        return min;
     }
 
     long getNodeCount()
@@ -91,7 +105,7 @@ public class Solver {
         int nbline = 0;
         long meantime = 0;
 
-        Scanner scanner = new Scanner(this.getClass().getResourceAsStream("Test_L1_R2"));
+        Scanner scanner = new Scanner(this.getClass().getResourceAsStream("Test_L1_R1"));
         while (scanner.hasNextLine()) {
             nbline++;
             String line = scanner.nextLine().split(" ")[0];
@@ -101,7 +115,7 @@ public class Solver {
             } else {
                 reset();
                 long start_time = System.currentTimeMillis();
-                int score = solve(P, 50);
+                int score = solve(P, false);
                 long end_time = System.currentTimeMillis();
                 meantime += end_time - start_time;
                 System.out.println(nbline + ": " + line + " " + score + " " + getNodeCount() + " " + (end_time - start_time));

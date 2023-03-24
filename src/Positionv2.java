@@ -4,6 +4,8 @@ public class Positionv2 implements Cloneable{
     static final int HEIGHT = 6; // height of the board
     static final int MIN_SCORE = -(WIDTH*HEIGHT)/2 + 3;
     static final int MAX_SCORE = (WIDTH*HEIGHT+1)/2 - 3;
+    static final long bottom_mask = bottom(WIDTH, HEIGHT);
+    static final long board_mask = bottom_mask * ((1L << HEIGHT)-1);
 
     private long current_position;
     private long mask;
@@ -29,16 +31,6 @@ public class Positionv2 implements Cloneable{
     }
 
     /**
-     * Indicates whether a column is playable.
-     * @param col: 0-based index of column to play
-     * @return true if the column is playable, false if the column is already full.
-     */
-    boolean canPlay(int col)
-    {
-        return (mask & top_mask(col)) == 0;
-    }
-
-    /**
      * Plays a playable column.
      * This function should not be called on a non-playable column or a column making an alignment.
      *
@@ -47,7 +39,7 @@ public class Positionv2 implements Cloneable{
     void play(int col)
     {
         current_position ^= mask;
-        mask |= mask + bottom_mask(col);
+        mask |= mask + bottom_mask_col(col);
         moves++;
     }
 
@@ -58,32 +50,28 @@ public class Positionv2 implements Cloneable{
      * @return number of played moves. Processing will stop at first invalid move that can be:
      *           - invalid character (non digit, or digit >= WIDTH)
      *           - playing a colum the is already full
-     *           - playing a column that makes an aligment (we only solve non).
+     *           - playing a column that makes an alignment (we only solve non).
      *         Caller can check if the move sequence was valid by comparing the number of
      *         processed moves to the length of the sequence.
      */
     long play(String seq)
     {
         for(int i = 0; i < seq.length(); i++) {
-            int col = seq.charAt(i) - '1';
-            if(col < 0 || col >= Position.WIDTH || !canPlay(col) || isWinningMove(col)) return i; // invalid move
-            play(col);
-        }
+        int col = seq.charAt(i) - '1';
+        if(col < 0 || col >= Position.WIDTH || !canPlay(col) || isWinningMove(col)) return i; // invalid move
+        play(col);
+    }
         return seq.length();
     }
 
-    /**
-     * Indicates whether the current player wins by playing a given column.
-     * This function should never be called on a non-playable column.
-     * @param col: 0-based index of a playable column.
-     * @return true if current player makes an alignment by playing the corresponding column col.
+    /*
+     * return true if current player can win next move
      */
-    boolean isWinningMove(int col)
+    boolean canWinNext()
     {
-        long pos = current_position;
-        pos |= (mask + bottom_mask(col)) & column_mask(col);
-        return alignment(pos);
+        return (winning_position() & possible())!=0;
     }
+
 
     /**
      * @return number of moves played from the beginning of the game.
@@ -101,38 +89,104 @@ public class Positionv2 implements Cloneable{
         return current_position + mask;
     }
 
-    /**
-     * Test an alignment for current player (identified by one in the bitboard pos)
-     * @param pos : bitboard position of a player's cells.
-     * @return true if the player has a 4-alignment.
+    /*
+     * Return a bitmap of all the possible next moves the do not lose in one turn.
+     * A losing move is a move leaving the possibility for the opponent to win directly.
+     *
+     * Warning this function is intended to test position where you cannot win in one turn
+     * If you have a winning move, this function can miss it and prefer to prevent the opponent
+     * to make an alignment.
      */
-    static boolean alignment(long pos) {
-        // horizontal
-        long m = pos & (pos >> (HEIGHT+1));
-        if((m & (m >> (2*(HEIGHT+1))))!=0) return true;
+    long possibleNonLoosingMoves() {
+        assert(!canWinNext());
+        long possible_mask = possible();
+        long opponent_win = opponent_winning_position();
+        long forced_moves = possible_mask & opponent_win;
+        if(forced_moves!=0) {
+            if((forced_moves & (forced_moves - 1))!=0) // check if there is more than one forced move
+                return 0;                           // the opponnent has two winning moves and you cannot stop him
+            else possible_mask = forced_moves;    // enforce to play the single forced move
+        }
+        return possible_mask & ~(opponent_win >> 1);  // avoid to play below an opponent winning spot
+    }
 
-        // diagonal 1
-        m = pos & (pos >> HEIGHT);
-        if((m & (m >> (2*HEIGHT)))!=0) return true;
+    /**
+     * Indicates whether a column is playable.
+     * @param col: 0-based index of column to play
+     * @return true if the column is playable, false if the column is already full.
+     */
+    boolean canPlay(int col)
+    {
+        return (mask & top_mask_col(col)) == 0;
+    }
 
-        // diagonal 2
-        m = pos & (pos >> (HEIGHT+2));
-        if((m & (m >> (2*(HEIGHT+2))))!=0) return true;
+    /**
+     * Indicates whether the current player wins by playing a given column.
+     * This function should never be called on a non-playable column.
+     * @param col: 0-based index of a playable column.
+     * @return true if current player makes an alignment by playing the corresponding column col.
+     */
+    boolean isWinningMove(int col)
+    {
+        return (winning_position() & possible() & column_mask(col))!=0;
+    }
 
+    /*
+     * Return a bitmask of the possible winning positions for the current player
+     */
+    long winning_position() {
+        return compute_winning_position(current_position, mask);
+    }
+
+    /*
+     * Return a bitmask of the possible winning positions for the opponent
+     */
+    long opponent_winning_position() {
+        return compute_winning_position(current_position ^ mask, mask);
+    }
+
+    long possible() {
+        return (mask + bottom_mask) & board_mask;
+    }
+
+    static long compute_winning_position(long position, long mask) {
         // vertical;
-        m = pos & (pos >> 1);
-        if((m & (m >> 2))!=0) return true;
+        long r = (position << 1) & (position << 2) & (position << 3);
 
-        return false;
+        //horizontal
+        long p = (position << (HEIGHT+1)) & (position << 2*(HEIGHT+1));
+        r |= p & (position << 3*(HEIGHT+1));
+        r |= p & (position >> (HEIGHT+1));
+        p = (position >> (HEIGHT+1)) & (position >> 2*(HEIGHT+1));
+        r |= p & (position << (HEIGHT+1));
+        r |= p & (position >> 3*(HEIGHT+1));
+
+        //diagonal 1
+        p = (position << HEIGHT) & (position << 2*HEIGHT);
+        r |= p & (position << 3*HEIGHT);
+        r |= p & (position >> HEIGHT);
+        p = (position >> HEIGHT) & (position >> 2*HEIGHT);
+        r |= p & (position << HEIGHT);
+        r |= p & (position >> 3*HEIGHT);
+
+        //diagonal 2
+        p = (position << (HEIGHT+2)) & (position << 2*(HEIGHT+2));
+        r |= p & (position << 3*(HEIGHT+2));
+        r |= p & (position >> (HEIGHT+2));
+        p = (position >> (HEIGHT+2)) & (position >> 2*(HEIGHT+2));
+        r |= p & (position << (HEIGHT+2));
+        r |= p & (position >> 3*(HEIGHT+2));
+
+        return r & (board_mask ^ mask);
     }
 
     // return a bitmask containg a single 1 corresponding to the top cel of a given column
-    static long top_mask(int col) {
+    static long top_mask_col(int col) {
         return ((long) 1 << (HEIGHT - 1)) << col*(HEIGHT+1);
     }
 
     // return a bitmask containg a single 1 corresponding to the bottom cell of a given column
-    static long bottom_mask(int col) {
+    static long bottom_mask_col(int col) {
         return (long) 1 << col*(HEIGHT+1);
     }
 
@@ -141,5 +195,7 @@ public class Positionv2 implements Cloneable{
         return (((long) 1 << HEIGHT)-1) << col*(HEIGHT+1);
     }
 
-
+    static long bottom(int width, int height) {
+        return width == 0 ? 0 : bottom(width-1, height) | 1L << (width-1)*(height+1);
+    }
 }
